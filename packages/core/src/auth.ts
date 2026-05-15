@@ -1,10 +1,11 @@
 import { PlaudConfig } from './config.js';
-import { resolveBaseUrl, PLAUD_USER_AGENT } from './types.js';
-import type { PlaudTokenData } from './types.js';
+import { resolveBaseUrl, PLAUD_USER_AGENT, BASE_URLS, normalizeRegion } from './types.js';
+import type { PlaudTokenData, PlaudCredentials } from './types.js';
 
 const TOKEN_REFRESH_BUFFER_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export interface PlaudJwtClaims {
+  sub?: string;
   iat: number;
   exp: number;
   region?: string;
@@ -101,6 +102,64 @@ export class PlaudAuth {
 
     this.config.saveToken(tokenData);
     return data.access_token;
+  }
+
+  async loginWithEmailPassword(email: string, password: string, region: string = 'eu'): Promise<PlaudCredentials & { userId: string }> {
+    this.config.saveCredentials({ email: email.trim(), password, region });
+    const token = await this.login();
+    const decoded = decodePlaudJwt(token);
+    return {
+      email: email.trim(),
+      password,
+      region,
+      authMode: 'password',
+      userId: decoded.sub ?? email.trim(),
+    };
+  }
+
+  async loginWithSsoToken(raw: string): Promise<PlaudCredentials & { userId: string }> {
+    const trimmed = raw.trim().replace(/^['"]|['"]$/g, '');
+    if (!trimmed) throw new Error('Empty SSO token.');
+
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2 || parts[0].toLowerCase() !== 'bearer') {
+      throw new Error("Expected 'Bearer <jwt>' format. Copy the full value of localStorage.pld_tokenstr, including the 'Bearer ' prefix.");
+    }
+
+    const jwt = parts.slice(1).join('');
+    if (jwt.split('.').length !== 3) {
+      throw new Error('Not a valid JWT (expected 3 dot-separated segments).');
+    }
+
+    const claims = decodePlaudJwt(jwt);
+    if (!claims.iat || !claims.exp) {
+      throw new Error("JWT missing 'iat' or 'exp' claims.");
+    }
+    if (claims.exp * 1000 <= Date.now()) {
+      throw new Error('Token is already expired. Refresh web.plaud.ai and copy a new tokenstr.');
+    }
+
+    const rawRegion = claims.region ?? 'us';
+    const normalized = normalizeRegion(rawRegion);
+    const region = BASE_URLS[normalized] ? normalized : 'us';
+
+    const tokenData: PlaudTokenData = {
+      accessToken: jwt,
+      tokenType: 'Bearer',
+      issuedAt: claims.iat * 1000,
+      expiresAt: claims.exp * 1000,
+    };
+
+    this.config.save({
+      credentials: { region, authMode: 'sso' },
+      token: tokenData,
+    });
+
+    return {
+      region,
+      authMode: 'sso',
+      userId: claims.sub ?? 'unknown',
+    };
   }
 
   private isExpiringSoon(token: PlaudTokenData): boolean {
