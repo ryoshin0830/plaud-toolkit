@@ -43,6 +43,13 @@ export function resolveBaseUrl(region: string): string {
   return BASE_URLS[region] ?? `https://api-${region}.plaud.ai`;
 }
 
+// Plaud's API sits behind Cloudflare, which 403s requests with Node's default
+// User-Agent (the response body is the CF challenge HTML). Send a browser-like
+// UA on every API call. Override via `PLAUD_USER_AGENT` if CF later rejects
+// this specific string and the toolkit hasn't been updated yet.
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+export const PLAUD_USER_AGENT = process.env.PLAUD_USER_AGENT || DEFAULT_USER_AGENT;
+
 export interface PlaudRecording {
   id: string;
   filename: string;

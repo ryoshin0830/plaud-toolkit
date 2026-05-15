@@ -46,6 +46,42 @@ The command walks you through it:
 
 Plaud tokens are valid ~300 days. Within 30 days of expiry the CLI errors out with `Re-run 'plaud login-sso'` — grab a fresh `tokenstr` from the browser and re-run.
 
+**Capturing the SSO token automatically (chrome-devtools MCP):**
+
+If you're driving this from an MCP-enabled agent (e.g. Claude Code with the `chrome-devtools` MCP), you don't need to copy-paste anything. The agent can grab the token, pipe it to `login-sso`, and verify in one shot:
+
+```js
+// 1. Open the Plaud web app (sign in once manually if not already signed in).
+mcp__chrome-devtools__new_page({ url: 'https://web.plaud.ai' })
+
+// 2. Read the token straight out of localStorage:
+mcp__chrome-devtools__evaluate_script({
+  function: `() => localStorage.getItem('tokenstr')`
+})
+// → returns e.g. "bearer eyJhbGci...sig"
+```
+
+Then pipe the returned string to `login-sso` via stdin (the CLI just reads one line from stdin):
+
+```bash
+echo 'bearer eyJhbGci...sig' \
+  | npx tsx packages/cli/bin/plaud.ts login-sso
+```
+
+The CLI parses the JWT, writes `~/.plaud/config.json` (mode 0600), then calls `/user/me` to confirm. If that final check 403s with a Cloudflare HTML body, it's the UA issue below — not the token.
+
+### Cloudflare User-Agent issue (403 Forbidden)
+
+Plaud's API is fronted by Cloudflare, which rejects requests sent with Node's default `node` User-Agent and returns a 403 + the "Attention Required / Just a moment" HTML challenge page. The toolkit sends a desktop-Chrome UA on every request to avoid this.
+
+If Cloudflare later starts rejecting the baked-in UA (the toolkit has not yet been updated to a newer string), override it without editing source:
+
+```bash
+export PLAUD_USER_AGENT='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/<new>.0.0.0 Safari/537.36'
+```
+
+The CLI and the MCP server both read this env var via `@plaud/core`. The error message on a CF block now explicitly tells you to set `PLAUD_USER_AGENT`, so you won't be stuck guessing whether the problem is the token or the UA.
+
 ### 2. CLI Usage
 
 ```bash

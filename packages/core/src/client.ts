@@ -1,6 +1,6 @@
 import * as zlib from 'zlib';
 import { PlaudAuth } from './auth.js';
-import { resolveBaseUrl } from './types.js';
+import { resolveBaseUrl, PLAUD_USER_AGENT } from './types.js';
 import type { PlaudRecording, PlaudRecordingDetail, PlaudUserInfo, TranscriptSegment } from './types.js';
 
 const REGION_RE = /^(?:https?:\/\/)?api(?:-([a-z0-9]+))?\.plaud\.ai/i;
@@ -8,6 +8,10 @@ const REGION_RE = /^(?:https?:\/\/)?api(?:-([a-z0-9]+))?\.plaud\.ai/i;
 function parseRegionFromDomain(domain: string): string {
   const m = REGION_RE.exec(domain);
   return m?.[1]?.toLowerCase() ?? 'us';
+}
+
+function looksLikeCloudflareBlock(body: string): boolean {
+  return /cloudflare|cf-ray|attention required|just a moment/i.test(body);
 }
 
 export class PlaudClient {
@@ -31,11 +35,20 @@ export class PlaudClient {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
+        'User-Agent': PLAUD_USER_AGENT,
         ...options?.headers,
       },
     });
 
     if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      if (res.status === 403 && looksLikeCloudflareBlock(body)) {
+        throw new Error(
+          `Plaud API error: 403 Forbidden (blocked by Cloudflare). ` +
+          `The User-Agent may have been flagged. Try setting PLAUD_USER_AGENT ` +
+          `to a current desktop browser UA string and retry.`
+        );
+      }
       throw new Error(`Plaud API error: ${res.status} ${res.statusText}`);
     }
 
@@ -110,7 +123,7 @@ export class PlaudClient {
   async downloadAudio(id: string): Promise<ArrayBuffer> {
     const token = await this.auth.getToken();
     const res = await fetch(`${this.baseUrl}/file/download/${id}`, {
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': PLAUD_USER_AGENT },
     });
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     return res.arrayBuffer();

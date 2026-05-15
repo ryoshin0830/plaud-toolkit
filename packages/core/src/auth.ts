@@ -1,5 +1,5 @@
 import { PlaudConfig } from './config.js';
-import { resolveBaseUrl } from './types.js';
+import { resolveBaseUrl, PLAUD_USER_AGENT } from './types.js';
 import type { PlaudTokenData } from './types.js';
 
 const TOKEN_REFRESH_BUFFER_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -73,7 +73,10 @@ export class PlaudAuth {
 
     const res = await fetch(`${baseUrl}/auth/access-token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': PLAUD_USER_AGENT,
+      },
       body: body.toString(),
     });
 
